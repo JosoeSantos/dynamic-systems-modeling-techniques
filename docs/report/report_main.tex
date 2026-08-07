@@ -1,0 +1,94 @@
+
+\documentclass[12pt,a4paper]{article}
+
+% Pacotes básicos
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{amsmath, amssymb}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{cite}
+\usepackage{listings} % para formatar blocos de código
+\usepackage{enumitem} % para controlar listas
+\usepackage{xcolor}   % necessário para cores no listings
+
+% Configurações do listings
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  numbers=left,
+  numberstyle=\tiny,
+  frame=single,
+  breaklines=true,
+  keywordstyle=\color{blue}\bfseries,
+  stringstyle=\color{red},
+  commentstyle=\color{green!60!black}\itshape,
+  showstringspaces=false
+}
+
+\graphicspath{{./}{../}{../../}{../../plots/}{../../plots/img/}}
+
+% \title{Relatório do Projeto de Grafos e Algoritmos de Busca}
+% \author{
+% Áquila Oliveira Souza | 2021019327 \\ 
+% Felippe Veloso Marinho | 2021072260 \\ 
+% Jefferson Pereira de Souza | 2022099049
+% }
+% \date{\today}
+
+\begin{document}
+
+% ==============================
+% CAPA
+% ==============================
+\begin{titlepage}
+    \centering
+    {\Large \textbf{Universidade Federal de Minas Gerais}}\\[0.3cm]
+    {\large Engenharia de Sistemas}\\[2cm]
+    
+    {\Huge \textbf{Relatório do Projeto de Grafos e Algoritmos de Busca}}\\[1.5cm]
+    
+    \textbf{Fundamentos de Inteligência Artificial}\\[0.5cm]
+    \textbf{Professores:} Cristiano Castro e João Pedro Campos\\[1.5cm]
+    
+    \begin{flushleft}
+        \textbf{Alunos:}\\
+        Áquila Oliveira Souza --- 2021019327\\
+        Arthur Jorge --- 2022055718\\
+        Felippe Veloso Marinho --- 2021072260\\
+        Jefferson Pereira de Souza --- 2022099049\\
+        Josoé Santos Queiroz --- 2019026982
+    \end{flushleft}
+    
+    \vfill
+    {\large Belo Horizonte, MG}\\
+    {\large \today}
+\end{titlepage}
+
+\clearpage
+\tableofcontents
+\clearpage
+
+% ==============================
+% INTRODUÇÃO
+% ==============================
+\section{Introdução}
+
+\section{Modelagem do Problema em Forma de Grafo}
+
+O problema da \textit{Ponte e da Tocha} foi modelado como um problema de busca em espaço de estados e também como um CSP (\textit{Constraint Satisfaction Problem}). Essa abordagem permite tanto a análise formal do problema em termos de grafos, como também a aplicação de algoritmos de busca clássicos para encontrar soluções ótimas. 
+
+\subsection{Estados}
+\subsection{Definição Formal do Grafo}
+
+\subsection{Algoritmo de Dijkstra}
+\section{Referências}
+\clearpage
+\addcontentsline{toc}{section}{Referências}
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
