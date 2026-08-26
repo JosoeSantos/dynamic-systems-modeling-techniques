@@ -113,9 +113,9 @@ def compute_F(hgm, he, Agm, Agb):
 
 def temp_gas_outlet(Tgi, Tb, F, Tm, he, Agb, Gg, cg):
     Gg = max(Gg, 1e-9)  # guard against div-by-zero, not just negative
-    driving = (Tgi - Tb + F * Tm) / (1 + F)
-    coeff = math.exp(-he * Agb * (1 + F) / (Gg * cg))
-    return Tgi - driving * (1 - coeff)
+    driving = (Tgi - (Tb + F * Tm) / (1 + F)) 
+    coeff = math.exp(-he * Agb  / (Gg * cg))
+    return (Tgi - driving) * (1 - coeff)
 
 
 def dynamic_model_derivatives(x, u, t, fixed, identified, geometric):
@@ -163,7 +163,7 @@ def dynamic_model_derivatives(x, u, t, fixed, identified, geometric):
     X0 = geometric["X0"]
 
     ## Dry beans mass
-    Mbd = Mb / (1 + geometric["X0"])
+
 
     Qe = 0  # Negligible heat loss
 
@@ -175,7 +175,7 @@ def dynamic_model_derivatives(x, u, t, fixed, identified, geometric):
     # x_3_dot
     # Moisture
     X_dot = -(k1 / Db**2) * math.exp(-k2 / (Tb + 273.15))
-
+    Mbd = Mb / (1 + X)
     # x_1_dot
     Tb_dot = (Qgb - Qgm + Qbm + Mbd * (Qr + fixed["lam"] * X_dot)) / (
         Mbd * (1 + X) * cb
@@ -252,52 +252,41 @@ def random_u(t):
     return np.array([np.full(len(t), 0.2), Tgi])
 
 
-def simulate(
-    time,
-    plant,
-    uf,
-    h,
-    x0,
-    title="Câmara de torrefação de café",
-    x=None,
-    output_multiplier=None,
-):
-    """run dynamic model simulation
+# ---------------------------------------------------------------------------
+# NÚCLEO DE SIMULAÇÃO (separado da plotagem, para permitir reaproveitamento
+# em comparações, como no teste do princípio da superposição)
+# ---------------------------------------------------------------------------
+def run_simulation(time, plant, uf, h, x0):
+    """Executa a simulação e retorna (t, x, y), sem plotar nada.
+
     time = { t_start, t_end }
     plant = "120kg" | "360kg"
-    u = system inputs
-    h = integration step
-    x0 = intial conditions
+    uf = função geradora de entrada u(t)
+    h = passo de integração
+    x0 = condição inicial
     """
-
     t = np.arange(time["t_start"], time["t_end"], h)
 
-    x = x if x is not None else np.zeros((len(x0), len(t)))  ## +1 for the output
+    x = np.zeros((len(x0), len(t)))
     y = np.zeros(len(t))
     u = uf(t)
 
-    geo = PLANTS[plant]
-
+    # cópia para não mutar o dicionário global PLANTS entre chamadas
+    geo = dict(PLANTS[plant])
     geo["X0"] = x0[2]
-    ## Creates the simulation conditions simplifying the derivative params
+
     dydt = partial(
         dynamic_model_derivatives,
         fixed=FIXED_PARAMS,
         geometric=geo,
         identified=IDENTIFIED_PARAMS,
     )
+
     x[:, 0] = x0
     for i in range(1, len(t)):
         x[:, i] = rk4(dydt, x[:, i - 1], u[:, i], t[i - 1], h)
 
-        ## Calc output
-        (
-            Tb,
-            Tm,
-            X,
-            He,
-            Ta,
-        ) = x[:, i]
+        (Tb, Tm, X, He, Ta) = x[:, i]
         Gg, Tgi = u[:, i]
         hgm = IDENTIFIED_PARAMS["hgm"]
         Agm, Ab, Agb, Abm = geometric_params(geo)
@@ -305,6 +294,21 @@ def simulate(
         cg = cg_air(Tgi)
         F = compute_F(hgm, he, Agm, Agb)
         y[i] = temp_gas_outlet(Tgi, Tb, F, Tm, he, Agb, Gg, cg)
+
+    return t, x, y, u
+
+
+def simulate(
+    time,
+    plant,
+    uf,
+    h,
+    x0,
+    title="Câmara de torrefação de café",
+):
+    """Executa a simulação e plota os resultados (comportamento original)."""
+
+    t, x, y, u = run_simulation(time, plant, uf, h, x0)
 
     fig, axes = plt.subplots(2, 2, figsize=(11, 8))
     fig.suptitle(title)
@@ -334,8 +338,149 @@ def simulate(
     axes[1, 1].set_ylabel("Moisture content [%]")
     axes[1, 1].legend()
     fig.tight_layout()
-    # plt.plot(t, x[2, :], label="Moisture")
     plt.show()
+
+    return t, x, y, u
+
+
+# ---------------------------------------------------------------------------
+# TESTE DO PRINCÍPIO DA SUPERPOSIÇÃO
+#
+# Um sistema é LINEAR se, e somente se, satisfizer simultaneamente:
+#   (i)  Aditividade:      y(u1 + u2) = y(u1) + y(u2)
+#   (ii) Homogeneidade:    y(k*u)     = k*y(u)
+#
+# Como o modelo tem um ponto de operação (equilíbrio) diferente de zero,
+# as duas propriedades são testadas em variáveis de DESVIO em torno de uma
+# entrada de referência (baseline) constante, partindo sempre da MESMA
+# condição inicial x0:
+#
+#   (i)  [y(u0+d1) - y(u0)] + [y(u0+d2) - y(u0)]  vs.  y(u0+d1+d2) - y(u0)
+#   (ii) k * [y(u0+d) - y(u0)]                    vs.  y(u0+k*d) - y(u0)
+#
+# Se o sistema fosse linear, as duas curvas de cada teste coincidiriam
+# perfeitamente (erro = 0). Qualquer diferença comprova a NÃO LINEARIDADE.
+# ---------------------------------------------------------------------------
+def _const_input_factory(Gg_const):
+    def u_const(t, Tgi):
+        return np.array([np.full(len(t), Gg_const), np.full(len(t), Tgi)])
+
+    return u_const
+
+
+def test_additivity(
+    time,
+    plant,
+    h,
+    x0,
+    Gg_const=0.2,
+    Tgi_base=120,
+    delta1=30,
+    delta2=15,
+    title="Teste de Aditividade (Superposição)",
+):
+    """Testa y(u1+u2) = y(u1) + y(u2) (em variáveis de desvio)."""
+
+    u_const = _const_input_factory(Gg_const)
+
+    u0 = partial(u_const, Tgi=Tgi_base)
+    u1 = partial(u_const, Tgi=Tgi_base + delta1)
+    u2 = partial(u_const, Tgi=Tgi_base + delta2)
+    u12 = partial(u_const, Tgi=Tgi_base + delta1 + delta2)
+
+    t, _, y0, _ = run_simulation(time, plant, u0, h, x0)
+    _, _, y1, _ = run_simulation(time, plant, u1, h, x0)
+    _, _, y2, _ = run_simulation(time, plant, u2, h, x0)
+    _, _, y12, _ = run_simulation(time, plant, u12, h, x0)
+
+    # resposta que a superposição PREVERIA, caso o sistema fosse linear
+    y_previsto = y1 + y2 - y0
+    erro = y12 - y_previsto
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    fig.suptitle(title)
+
+    axes[0].plot(t, y12, label=r"$y(u_1+u_2)$  (resposta real do sistema)")
+    axes[0].plot(
+        t,
+        y_previsto,
+        "--",
+        label=r"$y(u_1)+y(u_2)-y_0$  (previsto pela superposição)",
+    )
+    axes[0].set_title("Resposta real x resposta prevista pela superposição")
+    axes[0].set_xlabel("Tempo [s]")
+    axes[0].set_ylabel("Tgo [°C]")
+    axes[0].legend()
+
+    axes[1].plot(t, erro, color="tab:red")
+    axes[1].axhline(0, color="black", linewidth=0.8)
+    axes[1].set_title("Erro de superposição (real - previsto)")
+    axes[1].set_xlabel("Tempo [s]")
+    axes[1].set_ylabel("Erro [°C]")
+
+    fig.tight_layout()
+    plt.show()
+
+    erro_max = np.max(np.abs(erro))
+    print(f"[Aditividade] Erro máximo de superposição: {erro_max:.4f} °C")
+
+    return t, y0, y1, y2, y12, erro
+
+
+def test_homogeneity(
+    time,
+    plant,
+    h,
+    x0,
+    Gg_const=0.2,
+    Tgi_base=120,
+    delta=20,
+    scale=2,
+    title="Teste de Homogeneidade (Superposição)",
+):
+    """Testa y(k*u) = k*y(u) (em variáveis de desvio)."""
+
+    u_const = _const_input_factory(Gg_const)
+
+    u0 = partial(u_const, Tgi=Tgi_base)
+    u1 = partial(u_const, Tgi=Tgi_base + delta)
+    u_scaled = partial(u_const, Tgi=Tgi_base + scale * delta)
+
+    t, _, y0, _ = run_simulation(time, plant, u0, h, x0)
+    _, _, y1, _ = run_simulation(time, plant, u1, h, x0)
+    _, _, y_scaled, _ = run_simulation(time, plant, u_scaled, h, x0)
+
+    y_previsto = scale * (y1 - y0) + y0
+    erro = y_scaled - y_previsto
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    fig.suptitle(title)
+
+    axes[0].plot(t, y_scaled, label=rf"$y({scale}\cdot u)$  (resposta real)")
+    axes[0].plot(
+        t,
+        y_previsto,
+        "--",
+        label=rf"${scale}\cdot[y(u)-y_0]+y_0$  (previsto)",
+    )
+    axes[0].set_title("Resposta real x resposta prevista pela homogeneidade")
+    axes[0].set_xlabel("Tempo [s]")
+    axes[0].set_ylabel("Tgo [°C]")
+    axes[0].legend()
+
+    axes[1].plot(t, erro, color="tab:red")
+    axes[1].axhline(0, color="black", linewidth=0.8)
+    axes[1].set_title("Erro de homogeneidade (real - previsto)")
+    axes[1].set_xlabel("Tempo [s]")
+    axes[1].set_ylabel("Erro [°C]")
+
+    fig.tight_layout()
+    plt.show()
+
+    erro_max = np.max(np.abs(erro))
+    print(f"[Homogeneidade] Erro máximo de superposição: {erro_max:.4f} °C")
+
+    return t, y0, y1, y_scaled, erro
 
 
 # %% Op point and sim constants
@@ -345,7 +490,7 @@ X0 = 0.1
 # Initial conditions from paper
 # Tb, Tm, X, He, Ta,
 x0 = np.array([30.0, 121.0, X0, 0.0, 30.0])
-time_limits = {"t_start": 800, "t_end": 1600}
+time_limits = {"t_start": 0, "t_end": 800}
 
 integration_step = 1
 
@@ -391,7 +536,7 @@ simulate(
     r"Câmara de torrefação de café - Entrada aleatória (ruído)",
 )
 
-# %% Princípio da superposição
+# %% Princípio da superposição - visão inicial (entradas constantes isoladas)
 
 simulate(
     time_limits,
@@ -399,7 +544,7 @@ simulate(
     constant_u,
     integration_step,
     x0,
-    "Câmara de torrefação de café - Entrada constate 120",
+    "Câmara de torrefação de café - Entrada constante 120",
 )
 
 constant_u_60 = partial(constant_u, temp=60)
@@ -410,9 +555,36 @@ simulate(
     constant_u_60,
     integration_step,
     x0,
-    "Câmara de torrefação de café - Entrada constate 60",
+    "Câmara de torrefação de café - Entrada constante 60",
 )
 
-# t =  np.arange(time_limits["t_start"], time_limits["t_end"], 0.1)
-# plt.plot(t, constant_u(t))
-# plt.show()
+# %% Princípio da superposição - teste formal (aditividade + homogeneidade)
+#
+# Aqui comparamos a resposta real do sistema não linear com a resposta que
+# SERIA obtida se ele fosse linear (soma/escala das respostas individuais).
+# A diferença entre as curvas (erro != 0) é a prova de que o sistema
+# NÃO É LINEAR.
+
+test_additivity(
+    time_limits,
+    "120kg",
+    integration_step,
+    x0,
+    Gg_const=0.2,
+    Tgi_base=120,
+    delta1=60,
+    delta2=60,
+    title="Câmara de torrefação de café - Teste de Aditividade",
+)
+
+test_homogeneity(
+    time_limits,
+    "120kg",
+    integration_step,
+    x0,
+    Gg_const=0.2,
+    Tgi_base=120,
+    delta=20,
+    scale=2,
+    title="Câmara de torrefação de café - Teste de Homogeneidade",
+)
